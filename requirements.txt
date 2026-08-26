@@ -1,7 +1,7 @@
-langchain-core
-langchain-google-genai
-python-dotenv
-streamlit
-pandas
-openpyxl
-pywin32; sys_platform == "win32"
+langchain-core==1.6.0
+langchain-google-genai==4.3.5
+python-dotenv==1.2.2
+streamlit==1.62.0
+pandas==2.3.3
+openpyxl==3.1.5
+pywin32==312; sys_platform == "win32"

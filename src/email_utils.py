@@ -7,6 +7,8 @@ TEST_MODE safety rail only has to be enforced in one place.
 import smtplib
 from email.mime.text import MIMEText
 
+import pandas as pd
+
 from src.config import get_setting
 
 
@@ -70,7 +72,11 @@ def resolve_company_name_for_po(po_number: str) -> str:
     PO number just falls through to the fallback.
     """
     if is_cluster_mode():
-        prefix = (po_number or "").strip().upper()[:2]
+        # A blank Excel cell comes through pandas as NaN (a float), not an
+        # empty string — `po_number or ""` doesn't catch that, since NaN is
+        # truthy in Python, and float has no .strip(). pd.isna() is the
+        # correct check for "missing" here regardless of the value's type.
+        prefix = "" if pd.isna(po_number) else str(po_number).strip().upper()[:2]
         mapping = get_cluster_map()
         if prefix in mapping:
             return mapping[prefix]
