@@ -1,0 +1,27 @@
+# Secrets — never commit your actual API keys/credentials
+.env
+
+# Generated database — anyone cloning the repo rebuilds this via seed.py
+data/purchasing.db
+data/_test_*.db
+
+# Python cache/bytecode
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Virtual environment, if you're using one
+venv/
+.venv/
+env/
+
+# Streamlit local config/secrets (if you ever add a .streamlit/secrets.toml)
+.streamlit/secrets.toml
+
+# Editor/OS clutter
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
