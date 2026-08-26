@@ -6,7 +6,7 @@ A Streamlit-based purchasing assistant for hotel/hospitality procurement teams. 
 
 ## Test the app out!!
 
-- **link** — purchasing-agent.streamlit.app
+- **Link** — [purchasing-agent.streamlit.app](https://purchasing-agent.streamlit.app)
 
 ## Features
 
