@@ -111,6 +111,7 @@ purchasing-agent/
 │   ├── app.py                  # the whole Streamlit UI (bottom nav + all 4 pages)
 │   ├── config.py               # get_setting() — single source of truth for every config value
 │   ├── auth.py                 # require_admin() — the shared-password gate on 4 specific actions
+│   ├── db_init.py              # ensure_db_initialized() — self-heals data/purchasing.db if missing
 │   ├── vendor_admin.py         # add/update supplier backend
 │   ├── comparison_sheet.py     # merges per-supplier extractions, builds the downloadable .xlsx
 │   ├── email_utils.py          # SMTP sending + the TEST_MODE safety rail (single choke point)
@@ -135,11 +136,14 @@ Four tables, all in `data/schema.sql`:
 
 ## Notes / known limitations
 
+- **Storage is local SQLite, not guaranteed to persist.** `data/purchasing.db` is generated (via `data/seed.py`), gitignored, and auto-built on first run if missing — including automatically on a fresh Streamlit Cloud deployment, so a missing file never crashes the app. But Streamlit Community Cloud does not guarantee local file storage survives a redeploy or a wake-from-sleep restart, so any supplier added via **Manage Suppliers** (or any other write) could be lost the next time the app restarts. The app shows a caption about this in the UI itself. See also [Future work](#future-work) — this and the lack of authentication both stem from the same underlying gap: this isn't yet a durable multi-user deployment.
 - The Digitize Comparison Sheet feature extracts item rows only — a document's totals block (if present) is deliberately ignored, since vision extraction of that section proved unreliable. Nothing from that feature is persisted to the database; it's a pure upload → preview → download flow.
 - `.msg` download requires *classic* (desktop) Outlook, driven via COM automation — Microsoft's newer "New Outlook" app has no automation API at all, so `.msg` generation only works if classic Outlook is installed and reachable, even on a machine where New Outlook is the one actually signed in and used day to day. `.eml` has no such requirement and always works.
 - The very first `.msg` generation in a session may trigger a Windows security prompt ("a program is trying to access Outlook") that needs a manual click — later generations in the same session are fast.
 
 ## Future work
+
+Both items below stem from the same underlying gap: this app isn't yet a durable, multi-user deployment.
 
 - Multi-user authentication — a single shared admin password currently gates 
   Manage Suppliers, both "Send All" actions, and AI extraction (see 
@@ -147,3 +151,9 @@ Four tables, all in `data/schema.sql`:
   action taken while unlocked can't be attributed to a specific person. 
   A future version could give each user their own login and log who 
   performed each gated action, not just that it happened.
+- Durable storage — data lives in a local SQLite file (see 
+  [Notes / known limitations](#notes--known-limitations)), which Streamlit 
+  Community Cloud doesn't guarantee survives a redeploy or wake-from-sleep 
+  restart. A future version could move to a hosted database (e.g. Postgres) 
+  so supplier data and RFQ history persist reliably regardless of where 
+  it's deployed — a deliberate, separate decision, not a quick swap.
