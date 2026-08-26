@@ -10,7 +10,7 @@ import os
 
 import pandas as pd
 
-from src.email_utils import is_test_mode, get_company_name
+from src.email_utils import is_test_mode, resolve_company_name_for_po
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "purchasing.db")
 
@@ -147,9 +147,8 @@ def _build_table_html(rows: pd.DataFrame) -> str:
            f"<tr>{header_cells}</tr>{body_rows}</table>"
 
 
-def _build_body(rows: pd.DataFrame) -> str:
+def _build_body(rows: pd.DataFrame, company: str) -> str:
     table_html = _build_table_html(rows)
-    company = get_company_name()
     intro = f'<p style="{_TEXT_STYLE}">We are reaching out from {company}.</p>' if company else ""
     return (
         '<div style="background-color:#ffffff;padding:4px;">'
@@ -164,36 +163,56 @@ def _build_body(rows: pd.DataFrame) -> str:
 
 def draft_pending_market_list(df: pd.DataFrame, email_overrides: dict = None) -> list:
     """
-    Groups the parsed market-list rows by Supplier Name (one supplier can
-    have many pending rows), cross-checks each supplier against the
-    vendors table for an email, and builds one draft per supplier — a
-    fixed-template email whose body is an HTML table of only that
-    supplier's rows. No LLM involved.
+    Groups the parsed market-list rows by (Supplier Name, resolved
+    property name) — normally that's the same as grouping by supplier
+    alone, since resolve_company_name_for_po() falls back to the single
+    COMPANY_NAME when IS_CLUSTER is off. But when IS_CLUSTER is on and one
+    supplier's rows span more than one cluster property (mixed PO number
+    prefixes in a single upload), this gives that supplier one correctly
+    labeled email per property instead of blending both under one name.
+    No LLM involved.
 
     email_overrides lets the caller supply/override an email per supplier
     (e.g. a human-entered address for a supplier not found in the vendors
     table) — used as-is instead of the database lookup when provided.
 
-    Returns a list of {supplier_name, email, matched, rows, subject, body}
-    dicts. Sends nothing — sending is a separate, human-triggered step.
+    Returns a list of {supplier_name, company, email, matched, rows,
+    subject, body} dicts. Sends nothing — sending is a separate,
+    human-triggered step.
     """
     email_overrides = email_overrides or {}
+
+    df = df.copy()
+    df["_company"] = df["PO Number"].apply(resolve_company_name_for_po)
+
     supplier_names = sorted(df["Supplier Name"].unique())
     db_emails = match_supplier_emails(supplier_names)
 
+    group_keys = (
+        df[["Supplier Name", "_company"]]
+        .drop_duplicates()
+        .sort_values(["Supplier Name", "_company"])
+        .itertuples(index=False, name=None)
+    )
+
     drafts = []
-    for name in supplier_names:
-        supplier_rows = df[df["Supplier Name"] == name].drop(columns=["Supplier Name"]).reset_index(drop=True)
+    for name, company in group_keys:
+        supplier_rows = (
+            df[(df["Supplier Name"] == name) & (df["_company"] == company)]
+            .drop(columns=["Supplier Name", "_company"])
+            .reset_index(drop=True)
+        )
         matched_email = db_emails.get(name)
         email = email_overrides.get(name) or matched_email or suggest_test_email(name)
 
         drafts.append({
             "supplier_name": name,
+            "company": company,
             "email": email,
             "matched": matched_email is not None,
             "rows": supplier_rows,
             "subject": _build_subject(),
-            "body": _build_body(supplier_rows),
+            "body": _build_body(supplier_rows, company),
         })
 
     return drafts

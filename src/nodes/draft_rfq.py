@@ -32,12 +32,29 @@ def _get_vendor_emails(cur, vendor_id: str) -> list:
     return [row[0] for row in cur.fetchall()]
 
 
-def _reserve_rfq_number(cur, products: list, vendor_ids: list) -> int:
+def _log_rfq(cur, products: list, vendor_ids: list) -> int:
+    """Always logs the batch for audit/history, regardless of whether the
+    displayed RFQ number ends up being this row's auto-id or a manually
+    entered one — see peek_next_rfq_number() / draft_rfq()'s rfq_number arg."""
     cur.execute(
         "INSERT INTO rfq_log (products, vendor_ids, created_at) VALUES (?, ?, ?)",
         (json.dumps(products), ",".join(vendor_ids), str(date.today())),
     )
     return cur.lastrowid
+
+
+def peek_next_rfq_number() -> str:
+    """Suggests the next sequential RFQ number for the UI to pre-fill a
+    manual-entry field with — doesn't reserve or log anything, so calling
+    this repeatedly (e.g. on every Streamlit rerun) is free. The user can
+    keep the suggestion or type their own number entirely."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT MAX(rfq_id) FROM rfq_log")
+    row = cur.fetchone()
+    conn.close()
+    next_id = (row[0] or 0) + 1
+    return format_rfq_id(next_id)
 
 
 # Explicit color + background on every element, not just the wrapper — some
@@ -67,7 +84,7 @@ def _build_subject(rfq_number: str) -> str:
     return f"{base} [TEST MODE]" if is_test_mode() else base
 
 
-def _build_body(products: list) -> str:
+def _build_body(products: list, rfq_number: str) -> str:
     table_html = _build_table_html(products)
     company = get_company_name()
     intro = f'<p style="{_TEXT_STYLE}">We are reaching out from {company}.</p>' if company else ""
@@ -75,7 +92,8 @@ def _build_body(products: list) -> str:
         '<div style="background-color:#ffffff;padding:4px;">'
         f'<p style="{_TEXT_STYLE}">Dear Team,</p>'
         f"{intro}"
-        f'<p style="{_TEXT_STYLE}">Please share your quotation for the following:</p>'
+        f'<p style="{_TEXT_STYLE}">Please share your quotation (Ref: {rfq_number}) '
+        "for the following:</p>"
         f"{table_html}"
         f'<p style="{_TEXT_STYLE}">Kindly include unit price, minimum order quantity, '
         "and estimated lead time in your response.</p>"
@@ -86,11 +104,15 @@ def _build_body(products: list) -> str:
     )
 
 
-def draft_rfq(products: list, vendor_ids: list) -> dict:
+def draft_rfq(products: list, vendor_ids: list, rfq_number: str = None) -> dict:
     """
     products: list of {"description": str, "qty": ..., "uom": str} — entered
         directly by the user, never matched against the items catalog.
     vendor_ids: list of vendor_id strings to request quotes from.
+    rfq_number: optional — the UI pre-fills a suggested next number (see
+        peek_next_rfq_number()) but the human can override it with their
+        own before drafting. Every call still logs to rfq_log for audit
+        history regardless of whether this override is used.
 
     Returns {"rfq_number": "RFQ-0001", "drafts": [
         {"vendor_id", "vendor_name", "emails": [...], "subject", "body"}, ...
@@ -104,10 +126,10 @@ def draft_rfq(products: list, vendor_ids: list) -> dict:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    rfq_id = _reserve_rfq_number(cur, products, vendor_ids)
-    rfq_number = format_rfq_id(rfq_id)
+    rfq_id = _log_rfq(cur, products, vendor_ids)
+    rfq_number = rfq_number.strip() if rfq_number and rfq_number.strip() else format_rfq_id(rfq_id)
     subject = _build_subject(rfq_number)
-    body = _build_body(products)
+    body = _build_body(products, rfq_number)
 
     drafts = []
     for vendor_id in vendor_ids:

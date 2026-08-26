@@ -27,8 +27,56 @@ def get_company_name() -> str:
     Reads COMPANY_NAME from .env (e.g. "Hilton Dubai Jumeirah") for
     personalizing outgoing emails. Returns "" if unset — callers should
     treat that as "omit the personalized line", not print a blank name.
+
+    This is what RFQ emails always use — there's no PO number on an RFQ
+    (it's free-text products, not tied to a specific property's PO run),
+    so cluster resolution below doesn't apply there.
     """
     return os.getenv("COMPANY_NAME", "").strip()
+
+
+def is_cluster_mode() -> bool:
+    """IS_CLUSTER=true (exact, case-insensitive) enables PO-number-prefix
+    based property name resolution for Pending Market List. Defaults off."""
+    return os.getenv("IS_CLUSTER", "false").strip().lower() == "true"
+
+
+def get_cluster_map() -> dict:
+    """
+    Reads CLUSTER_1_CODE/CLUSTER_1_NAME, CLUSTER_2_CODE/CLUSTER_2_NAME, ...
+    from .env and returns {code: name}, e.g. {"HJ": "Hilton Dubai Jumeirah",
+    "HW": "Hilton Dubai The Walk"}. Scans as many numbered slots as are
+    actually set — not hardcoded to 2, add CLUSTER_3_CODE/CLUSTER_3_NAME
+    etc. for more properties. Codes are matched case-insensitively.
+    """
+    mapping = {}
+    n = 1
+    while True:
+        code = os.getenv(f"CLUSTER_{n}_CODE", "").strip().upper()
+        name = os.getenv(f"CLUSTER_{n}_NAME", "").strip()
+        if not code and not name:
+            break
+        if code and name:
+            mapping[code] = name
+        n += 1
+    return mapping
+
+
+def resolve_company_name_for_po(po_number: str) -> str:
+    """
+    For Pending Market List: if IS_CLUSTER is on, matches the PO number's
+    first 2 characters against the configured CLUSTER_N_CODE values and
+    returns that property's CLUSTER_N_NAME. Falls back to COMPANY_NAME —
+    same as the non-cluster/RFQ behavior — whenever clustering is off, no
+    code matches, or nothing is configured. Never raises; a bad/missing
+    PO number just falls through to the fallback.
+    """
+    if is_cluster_mode():
+        prefix = (po_number or "").strip().upper()[:2]
+        mapping = get_cluster_map()
+        if prefix in mapping:
+            return mapping[prefix]
+    return get_company_name()
 
 
 def send_email(recipient, subject: str, body: str, is_html: bool = False) -> dict:

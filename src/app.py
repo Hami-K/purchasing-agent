@@ -5,11 +5,14 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from src.nodes.draft_rfq import draft_rfq
+from src.nodes.draft_rfq import draft_rfq, peek_next_rfq_number
 from src.nodes.draft_pending_market_list import parse_market_list, draft_pending_market_list
 from src.nodes.extract_quote import extract_quote
 from src.comparison_sheet import merge_extractions, build_comparison_excel
 from src.email_utils import send_email, is_test_mode
+from src.email_export import (
+    is_msg_supported_platform, build_eml_bytes, build_msg_bytes, build_zip, safe_filename,
+)
 from src.vendor_admin import (
     list_vendors as list_all_vendors,
     list_categories as list_product_categories,
@@ -174,6 +177,21 @@ if active_page == "rfq":
     )
     selected_vendor_ids = [vendor_label_map[label] for label in selected_labels]
 
+    # A widget's session_state key can't be reassigned in the same run once
+    # the widget's already been instantiated — so "advance to the next
+    # suggested number after drafting" goes through this pending flag,
+    # applied here (before the widget exists this run) rather than
+    # directly in the button handler below (after it already exists).
+    if st.session_state.get("_rfq_number_advance"):
+        st.session_state.rfq_number_input = st.session_state._rfq_number_advance
+        st.session_state._rfq_number_advance = None
+    elif "rfq_number_input" not in st.session_state:
+        st.session_state.rfq_number_input = peek_next_rfq_number()
+    rfq_number_input = st.text_input(
+        "RFQ Number", key="rfq_number_input",
+        help="Pre-filled with the next sequential number — edit it if you use your own numbering.",
+    )
+
     if st.button("Draft RFQ", type="primary"):
         products = [
             {"description": p["description"].strip(), "qty": p["qty"], "uom": p["uom"].strip()}
@@ -184,14 +202,35 @@ if active_page == "rfq":
             st.error("Enter at least one product description.")
         elif not selected_vendor_ids:
             st.error("Select at least one supplier.")
+        elif not rfq_number_input.strip():
+            st.error("Enter an RFQ number.")
         else:
             with st.spinner("Drafting RFQ..."):
-                st.session_state.rfq_result = draft_rfq(products, selected_vendor_ids)
+                st.session_state.rfq_result = draft_rfq(
+                    products, selected_vendor_ids, rfq_number=rfq_number_input.strip()
+                )
+            for idx in range(len(st.session_state.rfq_result["drafts"])):
+                st.session_state[f"rfq_dl_select_{idx}"] = True
+            st.session_state.rfq_select_all = True
+            st.session_state["_rfq_select_all_prev"] = True
+            st.session_state._rfq_number_advance = peek_next_rfq_number()
             st.session_state.rfq_send_results = None
+            st.session_state.rfq_dl_msg_zip = None
+            st.session_state.rfq_dl_eml_zip = None
+            st.rerun()
 
     result = st.session_state.rfq_result
     if result:
         st.markdown(f"**{result['rfq_number']} — {len(result['drafts'])} draft(s) — review before sending:**")
+
+        if "rfq_select_all" not in st.session_state:
+            st.session_state.rfq_select_all = True
+        select_all = st.checkbox("Select All (for download)", key="rfq_select_all")
+        if st.session_state.get("_rfq_select_all_prev") != select_all:
+            st.session_state["_rfq_select_all_prev"] = select_all
+            for idx in range(len(result["drafts"])):
+                st.session_state[f"rfq_dl_select_{idx}"] = select_all
+            st.rerun()
 
         for idx, draft in enumerate(result["drafts"]):
             with st.expander(draft["vendor_name"], expanded=True):
@@ -206,6 +245,9 @@ if active_page == "rfq":
                 draft["subject"] = st.text_input("Subject", value=draft["subject"], key=f"rfq_subject_{idx}")
                 st.caption("Body preview")
                 components.html(draft["body"], height=150 + 40 * draft["body"].count("<tr>"), scrolling=True)
+                draft["_download_selected"] = st.checkbox(
+                    "Include in download", key=f"rfq_dl_select_{idx}"
+                )
 
         if st.button("Send All", type="primary"):
             missing = [d["vendor_name"] for d in result["drafts"] if not d.get("_emails_input", "").strip()]
@@ -235,8 +277,66 @@ if active_page == "rfq":
 
                 st.session_state.rfq_send_results = results
                 st.session_state.rfq_result = None
+                st.session_state.rfq_dl_msg_zip = None
+                st.session_state.rfq_dl_eml_zip = None
                 st.session_state.rfq_products = [{"description": "", "qty": 1, "uom": ""}]
                 st.rerun()
+
+        st.divider()
+        st.markdown("**Download as email files**")
+        st.caption(
+            "Select suppliers above, then download as .msg (Outlook) or .eml (opens in any "
+            "mail client) — a file you can send yourself, or keep as a record. These always "
+            "show the real recipient, regardless of TEST_MODE, since nothing is sent from here."
+        )
+
+        selected_for_download = [d for d in result["drafts"] if d.get("_download_selected")]
+
+        col_msg, col_eml = st.columns(2)
+        with col_msg:
+            if is_msg_supported_platform():
+                if st.button("Generate .msg", key="rfq_dl_msg_btn", disabled=not selected_for_download):
+                    with st.spinner("Generating via Outlook — the first time, check your taskbar "
+                                     "for a Windows security prompt to allow it..."):
+                        try:
+                            files = [
+                                (f"{result['rfq_number']}_{safe_filename(d['vendor_name'])}.msg",
+                                 build_msg_bytes(
+                                     [e.strip() for e in d["_emails_input"].split(",") if e.strip()],
+                                     d["subject"], d["body"], is_html=True,
+                                 ))
+                                for d in selected_for_download
+                            ]
+                            st.session_state.rfq_dl_msg_zip = build_zip(files)
+                            st.session_state.rfq_dl_msg_name = f"{result['rfq_number']}_msg.zip"
+                        except RuntimeError as e:
+                            st.error(str(e))
+                if st.session_state.get("rfq_dl_msg_zip"):
+                    st.download_button(
+                        "Download .msg (.zip)", data=st.session_state.rfq_dl_msg_zip,
+                        file_name=st.session_state.rfq_dl_msg_name, mime="application/zip",
+                        key="rfq_dl_msg_dlbtn",
+                    )
+            else:
+                st.caption("_.msg unavailable — requires Windows with Outlook installed._")
+        with col_eml:
+            if st.button("Generate .eml", key="rfq_dl_eml_btn", disabled=not selected_for_download):
+                files = [
+                    (f"{result['rfq_number']}_{safe_filename(d['vendor_name'])}.eml",
+                     build_eml_bytes(
+                         [e.strip() for e in d["_emails_input"].split(",") if e.strip()],
+                         d["subject"], d["body"], is_html=True,
+                     ))
+                    for d in selected_for_download
+                ]
+                st.session_state.rfq_dl_eml_zip = build_zip(files)
+                st.session_state.rfq_dl_eml_name = f"{result['rfq_number']}_eml.zip"
+            if st.session_state.get("rfq_dl_eml_zip"):
+                st.download_button(
+                    "Download .eml (.zip)", data=st.session_state.rfq_dl_eml_zip,
+                    file_name=st.session_state.rfq_dl_eml_name, mime="application/zip",
+                    key="rfq_dl_eml_dlbtn",
+                )
 
     if st.session_state.rfq_send_results:
         st.markdown("**Send results**")
@@ -285,6 +385,13 @@ elif active_page == "market_list":
                 else:
                     st.session_state.ml_drafts = draft_pending_market_list(df)
                     st.session_state.ml_send_results = None
+                    st.session_state.ml_dl_msg_zip = None
+                    st.session_state.ml_dl_eml_zip = None
+                    for idx in range(len(st.session_state.ml_drafts)):
+                        st.session_state[f"ml_dl_select_{idx}"] = True
+                    st.session_state.ml_select_all = True
+                    st.session_state["_ml_select_all_prev"] = True
+                    st.rerun()
         except ValueError as e:
             st.error(str(e))
 
@@ -294,8 +401,21 @@ elif active_page == "market_list":
         st.markdown(f"**{len(drafts)} supplier(s) — {len(drafts) - n_unmatched} matched in the vendor "
                     f"database, {n_unmatched} need an email confirmed below.**")
 
+        if "ml_select_all" not in st.session_state:
+            st.session_state.ml_select_all = True
+        select_all = st.checkbox("Select All (for download)", key="ml_select_all")
+        if st.session_state.get("_ml_select_all_prev") != select_all:
+            st.session_state["_ml_select_all_prev"] = select_all
+            for idx in range(len(drafts)):
+                st.session_state[f"ml_dl_select_{idx}"] = select_all
+            st.rerun()
+
         for idx, draft in enumerate(drafts):
-            with st.expander(f"{draft['supplier_name']} — {len(draft['rows'])} item(s)", expanded=not draft["matched"]):
+            label = draft["supplier_name"]
+            if draft.get("company"):
+                label += f" — {draft['company']}"
+            label += f" — {len(draft['rows'])} item(s)"
+            with st.expander(label, expanded=not draft["matched"]):
                 if draft["matched"]:
                     st.caption("Email matched from the vendor database.")
                 else:
@@ -305,6 +425,7 @@ elif active_page == "market_list":
                 st.dataframe(draft["rows"], width='stretch', hide_index=True)
                 st.caption(f"Subject: {draft['subject']}")
                 components.html(draft["body"], height=80 + 45 * (len(draft["rows"]) + 1), scrolling=True)
+                draft["_download_selected"] = st.checkbox("Include in download", key=f"ml_dl_select_{idx}")
 
         if st.button("Send All", type="primary", key="ml_send_all"):
             missing = [d["supplier_name"] for d in drafts if not d["email"].strip()]
@@ -331,7 +452,59 @@ elif active_page == "market_list":
 
                 st.session_state.ml_send_results = results
                 st.session_state.ml_drafts = None
+                st.session_state.ml_dl_msg_zip = None
+                st.session_state.ml_dl_eml_zip = None
                 st.rerun()
+
+        st.divider()
+        st.markdown("**Download as email files**")
+        st.caption(
+            "Select suppliers above, then download as .msg (Outlook) or .eml (opens in any "
+            "mail client) — a file you can send yourself, or keep as a record. These always "
+            "show the real recipient, regardless of TEST_MODE, since nothing is sent from here."
+        )
+
+        selected_for_download = [d for d in drafts if d.get("_download_selected")]
+
+        col_msg, col_eml = st.columns(2)
+        with col_msg:
+            if is_msg_supported_platform():
+                if st.button("Generate .msg", key="ml_dl_msg_btn", disabled=not selected_for_download):
+                    with st.spinner("Generating via Outlook — the first time, check your taskbar "
+                                     "for a Windows security prompt to allow it..."):
+                        try:
+                            files = [
+                                (f"PendingDelivery_{safe_filename(d['supplier_name'])}.msg",
+                                 build_msg_bytes(d["email"], d["subject"], d["body"], is_html=True))
+                                for d in selected_for_download
+                            ]
+                            st.session_state.ml_dl_msg_zip = build_zip(files)
+                            st.session_state.ml_dl_msg_name = "pending_market_list_msg.zip"
+                        except RuntimeError as e:
+                            st.error(str(e))
+                if st.session_state.get("ml_dl_msg_zip"):
+                    st.download_button(
+                        "Download .msg (.zip)", data=st.session_state.ml_dl_msg_zip,
+                        file_name=st.session_state.ml_dl_msg_name, mime="application/zip",
+                        key="ml_dl_msg_dlbtn",
+                    )
+            else:
+                st.caption("_.msg unavailable — requires Windows with Outlook installed._")
+        with col_eml:
+            if st.button("Generate .eml", key="ml_dl_eml_btn", disabled=not selected_for_download):
+                files = [
+                    (f"PendingDelivery_{safe_filename(d['supplier_name'])}.eml",
+                     build_eml_bytes(d["email"], d["subject"], d["body"], is_html=True))
+                    for d in selected_for_download
+                ]
+                st.session_state.ml_dl_eml_zip = build_zip(files)
+                st.session_state.ml_dl_eml_name = "pending_market_list_eml.zip"
+            if st.session_state.get("ml_dl_eml_zip"):
+                st.download_button(
+                    "Download .eml (.zip)", data=st.session_state.ml_dl_eml_zip,
+                    file_name=st.session_state.ml_dl_eml_name, mime="application/zip",
+                    key="ml_dl_eml_dlbtn",
+                )
 
     if st.session_state.ml_send_results:
         st.markdown("**Send results**")
