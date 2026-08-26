@@ -34,12 +34,6 @@ ensure_db_initialized()
 
 st.set_page_config(page_title="Purchasing Agent", layout="wide")
 st.title("Purchasing Agent")
-st.caption(
-    "⚠️ This deployment stores data locally (SQLite) — Streamlit Community "
-    "Cloud does not guarantee local storage survives a redeploy or a "
-    "wake-from-sleep restart. Suppliers added via Manage Suppliers could be "
-    "lost on a future restart."
-)
 
 # CSS only (no visible markup here, so no layout gap from this) — pins the
 # nav bar (rendered at the very end of the script, see bottom of file) to
