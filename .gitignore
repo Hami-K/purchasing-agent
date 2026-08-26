@@ -1,7 +1,7 @@
-# Secrets — never commit your actual API keys/credentials
+# Secrets - never commit your actual API keys/credentials
 .env
 
-# Generated database — anyone cloning the repo rebuilds this via seed.py
+# Generated database - anyone cloning the repo rebuilds this via seed.py
 data/purchasing.db
 data/_test_*.db
 

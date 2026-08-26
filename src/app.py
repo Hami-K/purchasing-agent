@@ -21,6 +21,7 @@ from src.vendor_admin import (
     create_vendor,
     update_vendor,
 )
+from src.auth import require_admin
 
 st.set_page_config(page_title="Purchasing Agent", layout="wide")
 st.title("Purchasing Agent")
@@ -250,6 +251,10 @@ if active_page == "rfq":
                 )
 
         if st.button("Send All", type="primary"):
+            st.session_state["_rfq_sendall_pending"] = True
+
+        if st.session_state.get("_rfq_sendall_pending") and require_admin("send real emails"):
+            st.session_state["_rfq_sendall_pending"] = False
             missing = [d["vendor_name"] for d in result["drafts"] if not d.get("_emails_input", "").strip()]
             if missing:
                 st.error(f"Missing recipient email for: {', '.join(missing)}")
@@ -428,6 +433,10 @@ elif active_page == "market_list":
                 draft["_download_selected"] = st.checkbox("Include in download", key=f"ml_dl_select_{idx}")
 
         if st.button("Send All", type="primary", key="ml_send_all"):
+            st.session_state["_ml_sendall_pending"] = True
+
+        if st.session_state.get("_ml_sendall_pending") and require_admin("send real emails"):
+            st.session_state["_ml_sendall_pending"] = False
             missing = [d["supplier_name"] for d in drafts if not d["email"].strip()]
             if missing:
                 st.error(f"Missing email for: {', '.join(missing)}")
@@ -545,6 +554,10 @@ elif active_page == "comparison":
                 st.caption(f"Uploaded: {f.name}")
 
     if st.button("Extract", disabled=not uploaded_files):
+        st.session_state["_extract_pending"] = True
+
+    if st.session_state.get("_extract_pending") and require_admin("run AI extraction"):
+        st.session_state["_extract_pending"] = False
         results = []
         errors = []
         with st.spinner(f"Reading {len(uploaded_files)} file(s) with Gemini vision — this can take a moment..."):
@@ -641,6 +654,10 @@ elif active_page == "vendors":
         emails_input = st.text_area("Emails (one per line)", key="va_new_emails", height=100)
 
         if st.button("Create Supplier", type="primary"):
+            st.session_state["_vendor_create_pending"] = True
+
+        if st.session_state.get("_vendor_create_pending") and require_admin("edit supplier data"):
+            st.session_state["_vendor_create_pending"] = False
             categories = [c.strip() for c in categories_input.split(",") if c.strip()]
             emails = [e.strip() for e in emails_input.splitlines() if e.strip()]
             try:
@@ -694,6 +711,10 @@ elif active_page == "vendors":
             )
 
             if st.button("Save Changes", type="primary"):
+                st.session_state["_vendor_update_pending"] = True
+
+            if st.session_state.get("_vendor_update_pending") and require_admin("edit supplier data"):
+                st.session_state["_vendor_update_pending"] = False
                 categories = [c.strip() for c in categories_input.split(",") if c.strip()]
                 emails = [e.strip() for e in emails_input.splitlines() if e.strip()]
                 try:

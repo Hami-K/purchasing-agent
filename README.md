@@ -82,8 +82,22 @@ All read from `.env` (see `.env.example` for the full template with inline comme
 | `COMPANY_NAME` | No | — | Your hotel/company name. RFQ emails always use this. Pending Market List uses it too, unless `IS_CLUSTER` is on. When set, outgoing emails add a line like "We are reaching out from [your company name]." When unset, that line is simply omitted |
 | `IS_CLUSTER` | No | `false` | Enables per-property name resolution for Pending Market List, for multi-property operations. When `true`, each row's PO number prefix is matched against the `CLUSTER_N_CODE` values below to choose that property's name; a PO number matching no configured code falls back to `COMPANY_NAME` |
 | `CLUSTER_1_CODE` / `CLUSTER_1_NAME`, `CLUSTER_2_CODE` / `CLUSTER_2_NAME`, ... | While `IS_CLUSTER=true` | — | Each pair maps a PO number's first 2 characters (case-insensitive) to a property name. Add more numbered pairs for additional properties |
+| `ADMIN_PASSWORD` | To use any of the four gated actions | — | A single shared password — see [Access control](#access-control) below |
 
 **Before your first real send:** confirm `TEST_MODE` is unset or `true` and `DEV_EMAIL` is your own address. Only set `TEST_MODE=false` once you're deliberately ready to email real suppliers.
+
+## Access control
+
+Browsing and viewing every tab requires no login at all. Four specific actions are gated behind a single shared password, set via `ADMIN_PASSWORD`:
+
+- **Send All** in Send RFQs
+- **Send All** in Pending Market List
+- **Extract** in Digitize Comparison Sheet
+- Creating or updating a supplier in Manage Suppliers
+
+The first time any of these is used in a browser session, the app prompts for `ADMIN_PASSWORD` inline. A correct entry unlocks all four actions for the rest of that session — it isn't asked again per click. Drafting, previewing, and downloading `.msg`/`.eml` files are never gated.
+
+This is a single shared password, not a per-user account system — there's no username, and everyone who has the password has the same access. It's checked in this order: `.streamlit/secrets.toml` first (this works for local development too, not just Streamlit Cloud), then `.env` as a fallback.
 
 ## Project structure
 
@@ -125,4 +139,9 @@ Four tables, all in `data/schema.sql`:
 
 ## Future work
 
-- Authentication — this is currently a single-user local tool, not a multi-tenant deployment.
+- Multi-user authentication — a single shared admin password currently gates 
+  Manage Suppliers, both "Send All" actions, and AI extraction (see 
+  [Access control](#access-control)). There's no per-user identity, so any 
+  action taken while unlocked can't be attributed to a specific person. 
+  A future version could give each user their own login and log who 
+  performed each gated action, not just that it happened.
