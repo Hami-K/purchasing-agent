@@ -7,31 +7,9 @@ call, or change the supplier directory call require_admin() first (see
 src/app.py for exactly which ones).
 """
 
-import os
-
 import streamlit as st
-from dotenv import load_dotenv
 
-load_dotenv()
-
-
-def _get_admin_password():
-    """
-    Checks .streamlit/secrets.toml first (st.secrets — this works for
-    local development too, not just Streamlit Cloud: Streamlit reads
-    .streamlit/secrets.toml from the project directory whenever it
-    exists, locally or deployed), then falls back to .env via
-    python-dotenv. Wrapped defensively: accessing st.secrets when no
-    secrets.toml exists at all raises in some Streamlit versions, and
-    that's a normal, expected state (e.g. .env-only local setups).
-    """
-    try:
-        value = st.secrets.get("ADMIN_PASSWORD")
-        if value:
-            return value
-    except Exception:
-        pass
-    return os.getenv("ADMIN_PASSWORD")
+from src.config import get_setting
 
 
 def require_admin(action_label: str) -> bool:
@@ -52,7 +30,7 @@ def require_admin(action_label: str) -> bool:
     if st.session_state.get("_admin_unlocked"):
         return True
 
-    correct_password = _get_admin_password()
+    correct_password = get_setting("ADMIN_PASSWORD")
     if not correct_password:
         st.error(
             "ADMIN_PASSWORD not configured — set it in .streamlit/secrets.toml "

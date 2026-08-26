@@ -70,7 +70,7 @@ If `streamlit` isn't on your PATH, run it as a module instead: `python -m stream
 
 ## Environment variables
 
-All read from `.env` (see `.env.example` for the full template with inline comments).
+Every setting below is read the same explicit way (`src/config.py`): `.streamlit/secrets.toml` first, then `.env` as a fallback (see `.env.example` for the full template with inline comments).
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -109,6 +109,8 @@ purchasing-agent/
 │   └── purchasing.db           # generated — not committed, see .gitignore
 ├── src/
 │   ├── app.py                  # the whole Streamlit UI (bottom nav + all 4 pages)
+│   ├── config.py               # get_setting() — single source of truth for every config value
+│   ├── auth.py                 # require_admin() — the shared-password gate on 4 specific actions
 │   ├── vendor_admin.py         # add/update supplier backend
 │   ├── comparison_sheet.py     # merges per-supplier extractions, builds the downloadable .xlsx
 │   ├── email_utils.py          # SMTP sending + the TEST_MODE safety rail (single choke point)

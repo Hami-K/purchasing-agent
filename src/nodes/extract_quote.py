@@ -3,13 +3,14 @@ import json
 import os
 import re
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-load_dotenv()
+from src.config import get_setting
 
-llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-3.6-flash", temperature=0, google_api_key=get_setting("GOOGLE_API_KEY")
+)
 
 _MIME_TYPES = {
     ".pdf": "application/pdf",

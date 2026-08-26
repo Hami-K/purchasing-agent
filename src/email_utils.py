@@ -4,47 +4,45 @@ codebase that talks to a real mail server — keep it that way so the
 TEST_MODE safety rail only has to be enforced in one place.
 """
 
-import os
 import smtplib
 from email.mime.text import MIMEText
-from dotenv import load_dotenv
 
-load_dotenv()
+from src.config import get_setting
 
 
 def is_test_mode() -> bool:
     """
     Fail-closed: anything other than the exact (case-insensitive) string
     "false" is treated as test mode ON. Unset, "true", a typo, an empty
-    string — all of those stay safe. Only a literal TEST_MODE=false in
-    .env enables sending to real vendor addresses.
+    string — all of those stay safe. Only a literal TEST_MODE=false
+    enables sending to real vendor addresses.
     """
-    return os.getenv("TEST_MODE", "true").strip().lower() != "false"
+    return get_setting("TEST_MODE", "true").strip().lower() != "false"
 
 
 def get_company_name() -> str:
     """
-    Reads COMPANY_NAME from .env (e.g. "Hilton Dubai Jumeirah") for
-    personalizing outgoing emails. Returns "" if unset — callers should
-    treat that as "omit the personalized line", not print a blank name.
+    Reads COMPANY_NAME (e.g. "Hilton Dubai Jumeirah") for personalizing
+    outgoing emails. Returns "" if unset — callers should treat that as
+    "omit the personalized line", not print a blank name.
 
     This is what RFQ emails always use — there's no PO number on an RFQ
     (it's free-text products, not tied to a specific property's PO run),
     so cluster resolution below doesn't apply there.
     """
-    return os.getenv("COMPANY_NAME", "").strip()
+    return get_setting("COMPANY_NAME", "").strip()
 
 
 def is_cluster_mode() -> bool:
     """IS_CLUSTER=true (exact, case-insensitive) enables PO-number-prefix
     based property name resolution for Pending Market List. Defaults off."""
-    return os.getenv("IS_CLUSTER", "false").strip().lower() == "true"
+    return get_setting("IS_CLUSTER", "false").strip().lower() == "true"
 
 
 def get_cluster_map() -> dict:
     """
     Reads CLUSTER_1_CODE/CLUSTER_1_NAME, CLUSTER_2_CODE/CLUSTER_2_NAME, ...
-    from .env and returns {code: name}, e.g. {"HJ": "Hilton Dubai Jumeirah",
+    and returns {code: name}, e.g. {"HJ": "Hilton Dubai Jumeirah",
     "HW": "Hilton Dubai The Walk"}. Scans as many numbered slots as are
     actually set — not hardcoded to 2, add CLUSTER_3_CODE/CLUSTER_3_NAME
     etc. for more properties. Codes are matched case-insensitively.
@@ -52,8 +50,8 @@ def get_cluster_map() -> dict:
     mapping = {}
     n = 1
     while True:
-        code = os.getenv(f"CLUSTER_{n}_CODE", "").strip().upper()
-        name = os.getenv(f"CLUSTER_{n}_NAME", "").strip()
+        code = get_setting(f"CLUSTER_{n}_CODE", "").strip().upper()
+        name = get_setting(f"CLUSTER_{n}_NAME", "").strip()
         if not code and not name:
             break
         if code and name:
@@ -111,8 +109,8 @@ def send_email(recipient, subject: str, body: str, is_html: bool = False) -> dic
 
     test_mode = is_test_mode()
 
-    gmail_address = os.getenv("GMAIL_ADDRESS")
-    gmail_app_password = os.getenv("GMAIL_APP_PASSWORD")
+    gmail_address = get_setting("GMAIL_ADDRESS")
+    gmail_app_password = get_setting("GMAIL_APP_PASSWORD")
     if not gmail_address or not gmail_app_password:
         raise RuntimeError(
             "GMAIL_ADDRESS and GMAIL_APP_PASSWORD must be set in .env to send email."
@@ -121,7 +119,7 @@ def send_email(recipient, subject: str, body: str, is_html: bool = False) -> dic
     intended = ", ".join(recipients)
 
     if test_mode:
-        dev_email = os.getenv("DEV_EMAIL")
+        dev_email = get_setting("DEV_EMAIL")
         if not dev_email:
             raise RuntimeError(
                 "TEST_MODE is on but DEV_EMAIL is not set in .env — refusing to send."
