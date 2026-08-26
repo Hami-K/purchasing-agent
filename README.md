@@ -4,6 +4,10 @@ A Streamlit-based purchasing assistant for hotel/hospitality procurement teams. 
 
 > 100% synthetic sample data. Nothing in this repo is tied to any real company, hotel, or supplier — seed data is fictional and email addresses use the `.test` TLD, which never resolves on the real internet.
 
+## Test the app out!!
+
+- **link** — purchasing-agent.streamlit.app
+
 ## Features
 
 - **Send RFQs** — build a free-text list of products (description / qty / UOM), pick a product category to auto-populate matching suppliers (or add any supplier manually), and draft one RFQ email per supplier. The RFQ number is pre-filled with the next sequential value and editable before drafting, and appears in both the subject and body of every generated email. Review the generated subject/body, then explicitly click **Send All** — nothing is emailed automatically. No LLM involved; it's a fixed template.
