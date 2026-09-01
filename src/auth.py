@@ -1,10 +1,9 @@
 """
-A single shared "owner password" gate for a handful of admin-style
-actions — NOT a user-account system, and NOT a login gate on the app
-itself. Browsing/viewing every tab always stays fully open with no
-prompt; only the specific actions that send real email, spend an LLM
-call, or change the supplier directory call require_admin() first (see
-src/app.py for exactly which ones).
+Shared admin-password gate for a fixed set of actions: sending real
+email, running AI extraction, and creating/updating a supplier (see
+src/app.py for the exact call sites). Not a user-account system and not a
+login gate on the app itself — browsing and viewing every tab requires no
+password.
 """
 
 import streamlit as st
@@ -14,18 +13,16 @@ from src.config import get_setting
 
 def require_admin(action_label: str) -> bool:
     """
-    Call this immediately before a gated action runs, and skip the action
-    if it returns False.
+    Returns True if the gated action may proceed, False otherwise. Call
+    immediately before the action runs and skip it when this returns False.
 
-    Prompts for the shared admin password once per browser session
-    (tracked via st.session_state) — after one correct entry, this and
-    every other gated action return True immediately for the rest of the
-    session, with no further prompting.
+    Prompts for the admin password once per browser session (tracked in
+    st.session_state); after one correct entry, every gated action
+    returns True for the rest of the session with no further prompting.
 
-    Renders its own small inline password prompt when locked, so callers
-    don't need any UI of their own beyond checking the return value. If
-    ADMIN_PASSWORD isn't configured anywhere, shows a clear error and
-    denies access rather than silently letting the action through.
+    Renders its own inline password prompt when locked — no separate UI
+    is needed at the call site beyond checking the return value. If
+    ADMIN_PASSWORD isn't configured, shows an error and returns False.
     """
     if st.session_state.get("_admin_unlocked"):
         return True

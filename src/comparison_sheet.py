@@ -2,8 +2,8 @@
 Combines multiple per-supplier extractions (one image/PDF per supplier,
 each already run through src/nodes/extract_quote.py) into one comparison
 view, and renders that view as a downloadable .xlsx matching the original
-multi-supplier comparison sheet layout. No database involved — this is a
-pure in-memory build for a download button.
+multi-supplier comparison sheet layout. In-memory only — no database
+access.
 """
 
 import io
@@ -29,9 +29,9 @@ def merge_extractions(parsed_list: list) -> dict:
     comparison structure.
 
     Items are matched across files by exact, whitespace-normalized,
-    case-insensitive item_description — no fuzzy matching. If two
-    suppliers describe "the same" item with different wording, they show
-    up as two separate rows rather than being silently merged.
+    case-insensitive item_description — no fuzzy matching. Two suppliers
+    describing the same item with different wording produce two separate
+    rows.
     """
     items_by_key = {}
     item_order = []

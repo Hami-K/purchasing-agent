@@ -8,7 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from src.nodes.draft_rfq import draft_rfq, peek_next_rfq_number
-from src.nodes.draft_pending_market_list import parse_market_list, draft_pending_market_list
+from src.nodes.draft_pending_market_list import parse_market_list, parse_supplier_directory, draft_pending_market_list
 from src.nodes.extract_quote import extract_quote
 from src.comparison_sheet import merge_extractions, build_comparison_excel
 from src.email_utils import send_email, is_test_mode
@@ -26,20 +26,19 @@ from src.vendor_admin import (
 from src.auth import require_admin
 from src.db_init import ensure_db_initialized
 
-# Must run before any tab below queries the database — builds
-# data/purchasing.db from schema.sql + seed data if it's missing (e.g. a
-# fresh Streamlit Cloud container). See src/db_init.py for why this has to
-# self-heal on every fresh start, not just once.
+# Runs before any tab below queries the database. Builds data/purchasing.db
+# from schema.sql plus seed data when missing (e.g. a fresh Streamlit Cloud
+# container). See src/db_init.py.
 ensure_db_initialized()
 
 st.set_page_config(page_title="Purchasing Agent", layout="wide")
 st.title("Purchasing Agent")
 
-# CSS only (no visible markup here, so no layout gap from this) — pins the
-# nav bar (rendered at the very end of the script, see bottom of file) to
-# the viewport bottom, and reserves matching space under the page content
-# so the fixed bar never covers anything. Defined once, up top, since it
-# has to apply regardless of where in the DOM the styled elements land.
+# CSS only, no markup — pins the nav bar (rendered at the end of this
+# script, see bottom of file) to the viewport bottom, and reserves matching
+# space under the page content so the fixed bar never covers it. Defined
+# once, up top, so it applies regardless of where in the DOM the styled
+# elements land.
 st.markdown(
     """
     <style>
@@ -88,14 +87,13 @@ _id_by_label = {label: page_id for page_id, label in NAV_PAGES}
 if "active_page" not in st.session_state:
     st.session_state.active_page = NAV_PAGES[0][0]
 
-# The nav widget itself is instantiated at the bottom of this file (so it
-# paints there, and so nothing about it adds height above the page
-# content) — but its value, keyed as "nav_segmented", is already resolved
-# in session_state by the time the script starts running each rerun, so
-# reading it here to decide what to render is safe. st.segmented_control
-# allows deselecting by clicking the active segment again (value becomes
-# None) — when that happens, keep showing whatever page was last active
-# rather than snapping back to the first tab.
+# The nav widget itself is instantiated at the bottom of this file, so it
+# paints there and adds no height above the page content. Its value, keyed
+# as "nav_segmented", is already resolved in session_state by the time the
+# script starts running each rerun, so it can be read here to decide what
+# to render. st.segmented_control allows deselecting by clicking the
+# active segment again (value becomes None); in that case the previously
+# active page stays shown instead of resetting to the first tab.
 _selected_label = st.session_state.get("nav_segmented")
 if _selected_label is not None:
     st.session_state.active_page = _id_by_label.get(_selected_label, st.session_state.active_page)
@@ -187,11 +185,11 @@ if active_page == "rfq":
     )
     selected_vendor_ids = [vendor_label_map[label] for label in selected_labels]
 
-    # A widget's session_state key can't be reassigned in the same run once
-    # the widget's already been instantiated — so "advance to the next
-    # suggested number after drafting" goes through this pending flag,
-    # applied here (before the widget exists this run) rather than
-    # directly in the button handler below (after it already exists).
+    # A widget's session_state key cannot be reassigned in the same run
+    # after the widget has been instantiated. Advancing to the next
+    # suggested number after drafting is applied here, before the widget
+    # exists this run, via this pending flag set in the button handler
+    # below.
     if st.session_state.get("_rfq_number_advance"):
         st.session_state.rfq_number_input = st.session_state._rfq_number_advance
         st.session_state._rfq_number_advance = None
@@ -358,17 +356,19 @@ if active_page == "rfq":
 
 # =====================================================================
 # Tab 2: Pending Market List — upload a pending-deliveries Excel export,
-# split it by supplier, cross-check each supplier against the vendors
-# table for an email, and draft one email per supplier (a fixed template
-# with only that supplier's rows as an HTML table — no LLM). Review, fill
-# in any missing emails, then explicitly send.
+# split it by supplier, match each supplier against the vendors table
+# and an optional uploaded supplier directory for an email, and draft one
+# email per supplier (a fixed template with only that supplier's rows as
+# an HTML table — no LLM). Review, fill in any missing emails, then
+# explicitly send.
 # =====================================================================
 elif active_page == "market_list":
     st.markdown(
         "Upload a pending market list Excel file (delivery date, supplier name, "
         "item description, qty, uom, PO number columns). Each supplier gets one "
         "email containing only their own rows — nothing is sent until you click "
-        "**Send All**."
+        "**Send All**. Optionally also upload a supplier database (name + email "
+        "columns) to match emails against for this draft only."
     )
 
     if is_test_mode():
@@ -385,10 +385,18 @@ elif active_page == "market_list":
 
     if "ml_drafts" not in st.session_state:
         st.session_state.ml_drafts = None
+    if "ml_warnings" not in st.session_state:
+        st.session_state.ml_warnings = None
     if "ml_send_results" not in st.session_state:
         st.session_state.ml_send_results = None
 
     uploaded_file = st.file_uploader("Pending market list (.xlsx)", type=["xlsx", "xls"], key="ml_uploader")
+    directory_file = st.file_uploader(
+        "Supplier database (optional) — for matching emails",
+        type=["xlsx", "xls"], key="ml_directory_uploader",
+        help="A supplier-name + email spreadsheet to match against for this draft only — "
+             "nothing here is saved. Matches from this file take priority over the vendor database.",
+    )
 
     if st.button("Create Draft", disabled=uploaded_file is None):
         try:
@@ -397,23 +405,39 @@ elif active_page == "market_list":
                 if df.empty:
                     st.error("No valid rows found in the uploaded file.")
                 else:
-                    st.session_state.ml_drafts = draft_pending_market_list(df)
+                    directory_index, directory_warnings = {}, []
+                    if directory_file is not None:
+                        directory_index, directory_collisions = parse_supplier_directory(directory_file)
+                        directory_warnings = [
+                            f"Uploaded supplier database: \"{c['normalized']}\" matches more than one "
+                            f"differently-spelled name ({', '.join(c['names'])}) — fix the spelling in "
+                            f"that file and re-upload for this name to match automatically."
+                            for c in directory_collisions
+                        ]
+
+                    drafts, draft_warnings = draft_pending_market_list(df, uploaded_directory=directory_index)
+                    st.session_state.ml_drafts = drafts
+                    st.session_state.ml_warnings = directory_warnings + draft_warnings
                     st.session_state.ml_send_results = None
                     st.session_state.ml_dl_msg_zip = None
                     st.session_state.ml_dl_eml_zip = None
-                    for idx in range(len(st.session_state.ml_drafts)):
-                        st.session_state[f"ml_dl_select_{idx}"] = True
+                    for idx, draft in enumerate(drafts):
+                        st.session_state[f"ml_dl_select_{idx}"] = draft["matched"]
                     st.session_state.ml_select_all = True
                     st.session_state["_ml_select_all_prev"] = True
                     st.rerun()
         except ValueError as e:
             st.error(str(e))
 
+    if st.session_state.ml_warnings:
+        for warning in st.session_state.ml_warnings:
+            st.warning(warning)
+
     drafts = st.session_state.ml_drafts
     if drafts:
         n_unmatched = sum(1 for d in drafts if not d["matched"])
-        st.markdown(f"**{len(drafts)} supplier(s) — {len(drafts) - n_unmatched} matched in the vendor "
-                    f"database, {n_unmatched} need an email confirmed below.**")
+        st.markdown(f"**{len(drafts)} supplier(s) — {len(drafts) - n_unmatched} matched automatically, "
+                    f"{n_unmatched} need an email confirmed below.**")
 
         if "ml_select_all" not in st.session_state:
             st.session_state.ml_select_all = True
@@ -431,11 +455,16 @@ elif active_page == "market_list":
             label += f" — {len(draft['rows'])} item(s)"
             with st.expander(label, expanded=not draft["matched"]):
                 if draft["matched"]:
-                    st.caption("Email matched from the vendor database.")
+                    st.caption("Email(s) matched automatically.")
                 else:
-                    st.warning("No matching vendor found in the database — using a suggested test "
-                               "address below. Edit it if you have the supplier's real email.")
-                draft["email"] = st.text_input("Recipient email", value=draft["email"], key=f"ml_email_{idx}")
+                    st.warning("No match found — using a suggested test address below. Edit it if "
+                               "you have the supplier's real email.")
+                emails_input = st.text_input(
+                    "Recipient email(s), comma-separated",
+                    value=", ".join(draft["emails"]),
+                    key=f"ml_emails_{idx}",
+                )
+                draft["_emails_input"] = emails_input
                 st.dataframe(draft["rows"], width='stretch', hide_index=True)
                 st.caption(f"Subject: {draft['subject']}")
                 components.html(draft["body"], height=80 + 45 * (len(draft["rows"]) + 1), scrolling=True)
@@ -446,21 +475,22 @@ elif active_page == "market_list":
 
         if st.session_state.get("_ml_sendall_pending") and require_admin("send real emails"):
             st.session_state["_ml_sendall_pending"] = False
-            missing = [d["supplier_name"] for d in drafts if not d["email"].strip()]
+            missing = [d["supplier_name"] for d in drafts if not d.get("_emails_input", "").strip()]
             if missing:
                 st.error(f"Missing email for: {', '.join(missing)}")
             else:
                 results = []
                 with st.spinner("Sending..."):
                     for draft in drafts:
+                        emails = [e.strip() for e in draft["_emails_input"].split(",") if e.strip()]
                         try:
-                            result = send_email(draft["email"], draft["subject"], draft["body"], is_html=True)
+                            result = send_email(emails, draft["subject"], draft["body"], is_html=True)
                             result["supplier_name"] = draft["supplier_name"]
                             result["status"] = "sent"
                         except Exception as e:
                             result = {
                                 "supplier_name": draft["supplier_name"],
-                                "intended_recipient": draft["email"],
+                                "intended_recipient": draft["_emails_input"],
                                 "actual_recipient": None,
                                 "test_mode": is_test_mode(),
                                 "status": "failed",
@@ -493,7 +523,10 @@ elif active_page == "market_list":
                         try:
                             files = [
                                 (f"PendingDelivery_{safe_filename(d['supplier_name'])}.msg",
-                                 build_msg_bytes(d["email"], d["subject"], d["body"], is_html=True))
+                                 build_msg_bytes(
+                                     [e.strip() for e in d["_emails_input"].split(",") if e.strip()],
+                                     d["subject"], d["body"], is_html=True,
+                                 ))
                                 for d in selected_for_download
                             ]
                             st.session_state.ml_dl_msg_zip = build_zip(files)
@@ -512,7 +545,10 @@ elif active_page == "market_list":
             if st.button("Generate .eml", key="ml_dl_eml_btn", disabled=not selected_for_download):
                 files = [
                     (f"PendingDelivery_{safe_filename(d['supplier_name'])}.eml",
-                     build_eml_bytes(d["email"], d["subject"], d["body"], is_html=True))
+                     build_eml_bytes(
+                         [e.strip() for e in d["_emails_input"].split(",") if e.strip()],
+                         d["subject"], d["body"], is_html=True,
+                     ))
                     for d in selected_for_download
                 ]
                 st.session_state.ml_dl_eml_zip = build_zip(files)
@@ -622,11 +658,10 @@ elif active_page == "comparison":
         )
 
 # =====================================================================
-# Tab 4: Manage Suppliers — the only two things this UI can do to
-# vendors.py data: add a brand new supplier, or update an existing one.
-# No delete, by design. Categories/emails here are multi-value
-# (vendor_categories / vendor_emails) and are what the Send RFQs tab
-# actually reads — not the legacy single vendors.category/email columns.
+# Tab 4: Manage Suppliers — add a new supplier or update an existing one.
+# Delete is not exposed. Categories/emails here are multi-value
+# (vendor_categories / vendor_emails), which is what the Send RFQs tab
+# reads — not the legacy single vendors.category/email columns.
 # =====================================================================
 elif active_page == "vendors":
     st.markdown(

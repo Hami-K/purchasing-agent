@@ -1,7 +1,7 @@
 """
-Actually sends RFQ emails via Gmail SMTP. This is the only file in the
-codebase that talks to a real mail server — keep it that way so the
-TEST_MODE safety rail only has to be enforced in one place.
+Sends RFQ emails via Gmail SMTP. This is the only file in the codebase
+that talks to a real mail server; the TEST_MODE safety rail is enforced
+here, in one place.
 """
 
 import smtplib
@@ -24,30 +24,31 @@ def is_test_mode() -> bool:
 
 def get_company_name() -> str:
     """
-    Reads COMPANY_NAME (e.g. "Hilton Dubai Jumeirah") for personalizing
-    outgoing emails. Returns "" if unset — callers should treat that as
-    "omit the personalized line", not print a blank name.
+    Reads COMPANY_NAME for personalizing outgoing emails. Returns "" if
+    unset, meaning the personalized line is omitted rather than printed
+    blank.
 
-    This is what RFQ emails always use — there's no PO number on an RFQ
-    (it's free-text products, not tied to a specific property's PO run),
-    so cluster resolution below doesn't apply there.
+    RFQ emails always use this — an RFQ has no PO number (products are
+    free text, not tied to a specific property's PO run), so the cluster
+    resolution in resolve_company_name_for_po() below does not apply
+    there.
     """
     return get_setting("COMPANY_NAME", "").strip()
 
 
 def is_cluster_mode() -> bool:
     """IS_CLUSTER=true (exact, case-insensitive) enables PO-number-prefix
-    based property name resolution for Pending Market List. Defaults off."""
+    based property name resolution for Pending Market List. Default off."""
     return get_setting("IS_CLUSTER", "false").strip().lower() == "true"
 
 
 def get_cluster_map() -> dict:
     """
     Reads CLUSTER_1_CODE/CLUSTER_1_NAME, CLUSTER_2_CODE/CLUSTER_2_NAME, ...
-    and returns {code: name}, e.g. {"HJ": "Hilton Dubai Jumeirah",
-    "HW": "Hilton Dubai The Walk"}. Scans as many numbered slots as are
-    actually set — not hardcoded to 2, add CLUSTER_3_CODE/CLUSTER_3_NAME
-    etc. for more properties. Codes are matched case-insensitively.
+    and returns {code: name}, e.g. {"HJ": "Property Jumeirah",
+    "HW": "Property Walk"}. Scans numbered slots until one is entirely
+    unset — add CLUSTER_3_CODE/CLUSTER_3_NAME etc. for more properties.
+    Codes are matched case-insensitively.
     """
     mapping = {}
     n = 1
@@ -66,16 +67,16 @@ def resolve_company_name_for_po(po_number: str) -> str:
     """
     For Pending Market List: if IS_CLUSTER is on, matches the PO number's
     first 2 characters against the configured CLUSTER_N_CODE values and
-    returns that property's CLUSTER_N_NAME. Falls back to COMPANY_NAME —
-    same as the non-cluster/RFQ behavior — whenever clustering is off, no
-    code matches, or nothing is configured. Never raises; a bad/missing
-    PO number just falls through to the fallback.
+    returns that property's CLUSTER_N_NAME. Falls back to COMPANY_NAME
+    (same value RFQ emails use) when clustering is off, no code matches,
+    or no cluster is configured. Accepts pandas NaN or any other
+    non-string value for po_number without raising.
     """
     if is_cluster_mode():
-        # A blank Excel cell comes through pandas as NaN (a float), not an
-        # empty string — `po_number or ""` doesn't catch that, since NaN is
-        # truthy in Python, and float has no .strip(). pd.isna() is the
-        # correct check for "missing" here regardless of the value's type.
+        # pandas represents a blank Excel cell as NaN (a float); NaN is
+        # truthy in Python, so `po_number or ""` does not catch it, and a
+        # float has no .strip(). pd.isna() is the correct missing-value
+        # check regardless of po_number's type.
         prefix = "" if pd.isna(po_number) else str(po_number).strip().upper()[:2]
         mapping = get_cluster_map()
         if prefix in mapping:
@@ -87,26 +88,26 @@ def send_email(recipient, subject: str, body: str, is_html: bool = False) -> dic
     """
     Sends one email via Gmail SMTP (smtplib, SMTP_SSL on port 465).
 
-    `recipient` may be a single email string or a list of email strings
-    (e.g. every email on file for one vendor) — all of them go in the "To"
-    line of one email.
+    recipient: a single email string, or a list of email strings (e.g.
+    every email on file for one vendor) — all go in the "To" line of one
+    email.
 
     In TEST_MODE (default True), the real recipient(s) are ignored and the
-    email is sent to the single DEV_EMAIL address instead — regardless of
-    what's passed in or what's stored in the database. Only when TEST_MODE
-    is explicitly "false" do the real recipient(s) get used.
+    email goes to the single DEV_EMAIL address instead, regardless of what
+    was passed in or stored in the database. Only TEST_MODE="false" sends
+    to the real recipient(s).
 
-    `subject` is sent exactly as given — callers (e.g. draft_rfq.py) are
-    responsible for their own TEST_MODE-aware subject line, since they own
-    the template. This function only adds a short redirect note to the
-    BODY in test mode, so a redirected email still says who it was really
-    meant for even though the subject won't.
+    subject is sent exactly as given; each caller (e.g. draft_rfq.py) owns
+    its own subject template, including any TEST_MODE marker in it. This
+    function prepends a redirect note to the body in test mode, naming
+    the original intended recipient(s) — the subject itself carries no
+    such note.
 
-    Set is_html=True to send `body` as an HTML email (e.g. a formatted
-    table) instead of plain text.
+    is_html=True sends body as an HTML email (e.g. a formatted table)
+    instead of plain text.
 
-    Returns a dict describing what actually happened (intended vs. actual
-    recipient(s), and whether test mode redirected it), for the UI to show.
+    Returns a dict describing what actually happened: intended vs. actual
+    recipient(s), and whether TEST_MODE redirected it.
     """
     recipients = [recipient] if isinstance(recipient, str) else list(recipient)
     recipients = [r.strip() for r in recipients if r and r.strip()]

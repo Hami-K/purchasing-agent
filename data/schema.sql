@@ -3,12 +3,11 @@
 
 PRAGMA foreign_keys = ON;
 
--- Vendor master list. `email` here is a legacy single-value field still
--- used by the Pending Market List feature's auto-match. `category` is
--- fully vestigial — nothing reads it anymore, kept only because it's
--- NOT NULL and seed.py still populates it. vendor_categories and
--- vendor_emails below are the real, current source of truth for a
--- vendor's categories/emails, since a vendor can have more than one of each.
+-- Vendor master list. `category` and `email` are legacy single-value
+-- fields; both are fully vestigial, nothing reads either one. `category`
+-- stays NOT NULL because seed.py still populates it. vendor_categories
+-- and vendor_emails below are the current source of truth for a vendor's
+-- categories and emails — a vendor can have more than one of each.
 CREATE TABLE vendors (
     vendor_id       TEXT PRIMARY KEY,      -- e.g. 'V-101'
     name            TEXT NOT NULL,
@@ -16,7 +15,7 @@ CREATE TABLE vendors (
     payment_terms   TEXT,                  -- e.g. 'Net 30'
     rating          REAL,                  -- 1.0 - 5.0, synthetic reliability score
     lead_time_days  INTEGER,
-    email           TEXT                   -- legacy single email, kept for Pending Market List
+    email           TEXT                   -- vestigial, unused — see note above
 );
 
 -- A vendor can sell more than one product category — this is what the RFQ

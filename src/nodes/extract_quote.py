@@ -76,14 +76,13 @@ def _strip_code_fence(text: str) -> str:
 
 def extract_quote(file_path: str) -> dict:
     """
-    Sends a photographed/scanned comparison sheet (image or PDF, given as a
-    file path) to Gemini vision and returns the parsed structure:
+    Sends a photographed/scanned comparison sheet (image or PDF, given as
+    a file path) to Gemini vision and returns the parsed structure:
     {"items": [...]}.
 
     Handles .content coming back as a list of blocks instead of a plain
-    string. Raises ValueError (with the raw model response attached) if
-    the reply isn't valid JSON, or is missing the expected top-level keys
-    — never returns partial/guessed data silently.
+    string. Raises ValueError, with the raw model response attached, if
+    the reply is not valid JSON or is missing the expected top-level keys.
     """
     mime_type = _guess_mime_type(file_path)
     with open(file_path, "rb") as f:

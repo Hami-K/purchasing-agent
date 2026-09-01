@@ -16,7 +16,7 @@ SCHEMA_PATH = os.path.join(HERE, "schema.sql")
 
 
 def build_db():
-    # Always start fresh — this script should be safe to re-run anytime.
+    # Starts fresh on every call: safe to re-run at any time.
     if os.path.exists(DB_PATH):
         os.remove(DB_PATH)
 
@@ -27,11 +27,10 @@ def build_db():
         cur.executescript(f.read())
 
     # --- Vendors -------------------------------------------------------
-    # Emails are 100% synthetic placeholders on a fictional "quotewell.test"
-    # domain — deliberately not a real company's domain, and ".test" is the
-    # IANA-reserved TLD for exactly this purpose (never resolves on the
-    # real internet). Only used as the RFQ send target, and only ever
-    # actually reached when TEST_MODE=false.
+    # Emails are synthetic placeholders on a fictional "quotewell.test"
+    # domain. ".test" is the IANA-reserved TLD for this purpose and never
+    # resolves on the real internet. Used as the RFQ send target, reached
+    # only when TEST_MODE=false.
     vendors = [
         ("V-101", "Gulf Linen Supplies",        "Housekeeping",    "Net 30", 4.5, 5,  "sales@gulflinen.quotewell.test"),
         ("V-102", "Emirates F&B Distributors",   "Food & Beverage", "Net 15", 4.2, 3,  "orders@emiratesfnb.quotewell.test"),

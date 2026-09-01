@@ -1,8 +1,8 @@
 """
-Drafts one RFQ email per selected vendor, from a free-text list of products
-(description/qty/UOM) entered directly in the UI — no lookup against the
-`items` catalog, no LLM. Every vendor in one call shares the same RFQ
-number, and is addressed to every email on file for that vendor.
+Drafts one RFQ email per selected vendor, from a free-text list of
+products (description/qty/UOM) entered directly in the UI. No lookup
+against an items catalog, no LLM. Every vendor in one call shares the
+same RFQ number and is addressed to every email on file for that vendor.
 """
 
 import json
@@ -33,9 +33,9 @@ def _get_vendor_emails(cur, vendor_id: str) -> list:
 
 
 def _log_rfq(cur, products: list, vendor_ids: list) -> int:
-    """Always logs the batch for audit/history, regardless of whether the
-    displayed RFQ number ends up being this row's auto-id or a manually
-    entered one — see peek_next_rfq_number() / draft_rfq()'s rfq_number arg."""
+    """Logs the batch for audit/history. Runs regardless of whether the
+    displayed RFQ number is this row's auto-id or a manually entered one
+    — see peek_next_rfq_number() and draft_rfq()'s rfq_number argument."""
     cur.execute(
         "INSERT INTO rfq_log (products, vendor_ids, created_at) VALUES (?, ?, ?)",
         (json.dumps(products), ",".join(vendor_ids), str(date.today())),
@@ -44,10 +44,10 @@ def _log_rfq(cur, products: list, vendor_ids: list) -> int:
 
 
 def peek_next_rfq_number() -> str:
-    """Suggests the next sequential RFQ number for the UI to pre-fill a
-    manual-entry field with — doesn't reserve or log anything, so calling
-    this repeatedly (e.g. on every Streamlit rerun) is free. The user can
-    keep the suggestion or type their own number entirely."""
+    """Returns the next sequential RFQ number, for the UI to pre-fill a
+    manual-entry field with. Reserves or logs nothing, so it is safe to
+    call on every Streamlit rerun. The user can keep the suggestion or
+    enter a different number."""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT MAX(rfq_id) FROM rfq_log")
@@ -57,10 +57,10 @@ def peek_next_rfq_number() -> str:
     return format_rfq_id(next_id)
 
 
-# Explicit color + background on every element, not just the wrapper — some
-# email clients (and Streamlit's own HTML preview, which renders in a
-# transparent iframe) apply dark-mode auto-inversion per-element, so
-# relying on inheritance from an outer wrapper isn't enough on its own.
+# Color and background are set explicitly on every element, not just the
+# wrapper: some email clients, and Streamlit's own HTML preview (rendered
+# in a transparent iframe), apply dark-mode auto-inversion per element, so
+# inheritance from an outer wrapper is not sufficient.
 _TEXT_STYLE = "font-family:Arial,sans-serif;font-size:14px;color:#111111;background-color:#ffffff;"
 _CELL_STYLE = "border:1px solid #999;padding:6px 10px;font-family:Arial,sans-serif;font-size:13px;color:#111111;background-color:#ffffff;"
 _HEADER_CELL_STYLE = _CELL_STYLE.replace("background-color:#ffffff;", "background-color:#cfe2f3;") + "text-align:left;"

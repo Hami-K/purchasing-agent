@@ -1,6 +1,6 @@
 """
 Backend for the "Manage Suppliers" UI: add a new supplier, or update an
-existing one. No delete — by design, only add and update are exposed.
+existing one. Delete is not exposed.
 """
 
 import re
@@ -93,9 +93,8 @@ def _next_vendor_id(cur) -> str:
 def create_vendor(name: str, categories: list, payment_terms: str, rating, lead_time_days, emails: list) -> str:
     """
     Inserts a new vendor plus its categories and emails. The legacy
-    vendors.category/email columns (kept only for Pending Market List) are
-    left blank/null — vendor_categories/vendor_emails are this vendor's
-    real data going forward.
+    vendors.category/email columns are left blank/null — nothing reads
+    them; vendor_categories/vendor_emails hold this vendor's actual data.
 
     Returns the newly assigned vendor_id.
     """
@@ -139,8 +138,7 @@ def create_vendor(name: str, categories: list, payment_terms: str, rating, lead_
 def update_vendor(vendor_id: str, name: str, categories: list, payment_terms: str, rating, lead_time_days, emails: list):
     """
     Updates a vendor's core fields, and replaces its categories/emails
-    entirely with the given lists (delete-then-reinsert — simplest correct
-    behavior for a low-frequency admin edit, not a high-churn table).
+    entirely with the given lists (delete then reinsert).
     """
     name = name.strip()
     if not name:

@@ -1,16 +1,17 @@
 """
 Builds downloadable email files (.eml / .msg) from an already-drafted
-subject/body/recipient list — this never sends anything, it just packages
-the exact same content the draft review screen shows into a file the user
-can keep as a reference or send themselves through their own mail client.
+subject/body/recipient list. Sends nothing — packages the same content
+the draft review screen shows into a file the user can keep as a record
+or send through their own mail client.
 
-.eml (RFC 822) is pure standard library — portable to any OS this app
-might run on. .msg is Outlook's own binary format; producing a *real* one
-requires driving desktop Outlook via COM automation (pywin32), which only
-works when this app is running on Windows with Outlook installed locally.
-Deliberately not routed through TEST_MODE — these are files under the
-user's own control once downloaded, not something this app sends, so they
-show the real intended recipient always.
+.eml (RFC 822) uses only the standard library and is portable to any OS
+this app runs on. .msg is Outlook's binary format; producing one requires
+driving desktop Outlook via COM automation (pywin32), which works only on
+Windows with Outlook installed locally.
+
+Not routed through TEST_MODE: these are files under the user's own
+control once downloaded, not something this app sends on its own, so
+they always carry the real intended recipient.
 """
 
 import io
@@ -23,20 +24,20 @@ from email.utils import formatdate
 
 
 def safe_filename(name: str) -> str:
-    # Strip only what's actually illegal in a Windows/Mac/Linux filename —
-    # keep punctuation like & and () readable rather than underscoring everything.
+    # Replaces only characters illegal in a Windows/Mac/Linux filename;
+    # punctuation such as & and () is left as-is.
     cleaned = re.sub(r'[\\/:*?"<>|]+', "_", name or "").strip().rstrip(".")
     return cleaned or "email"
 
 
 def is_msg_supported_platform() -> bool:
     """
-    Cheap, side-effect-free check: is pywin32 importable at all? This does
-    NOT launch or attach to Outlook (that only happens lazily, inside
-    build_msg_bytes, when the user actually clicks to generate one) — safe
-    to call on every Streamlit rerun to decide whether to show the .msg
-    button. Outlook itself might still turn out to be missing even when
-    this returns True; that surfaces as a caught exception at click time.
+    Returns whether pywin32 is importable. Does not launch or attach to
+    Outlook — that happens lazily inside build_msg_bytes(), when a .msg is
+    actually generated. Safe to call on every Streamlit rerun to decide
+    whether to show the .msg button. Outlook may still be missing even
+    when this returns True; that surfaces as an exception at generation
+    time, not here.
     """
     try:
         import win32com.client  # noqa: F401
@@ -60,18 +61,16 @@ def build_eml_bytes(recipients, subject: str, body: str, is_html: bool = False, 
 def build_msg_bytes(recipients, subject: str, body: str, is_html: bool = False) -> bytes:
     """
     Builds one .msg file's raw bytes by driving desktop Outlook via COM
-    automation and saving a real draft item to a temp file. Every step is
-    wrapped separately so a failure says exactly which COM call broke and
-    why (the real pywintypes.com_error text), instead of a generic
-    "is Outlook installed?" guess that's useless once Outlook demonstrably
-    *is* installed and signed in.
+    automation and saving a draft item to a temp file. Each COM call is
+    wrapped separately so a failure reports exactly which call failed and
+    the underlying pywintypes.com_error text, rather than one generic
+    "is Outlook installed?" message.
 
-    Explicitly calls pythoncom.CoInitialize()/CoUninitialize() around the
-    whole COM session. This matters specifically because this function is
-    called from inside Streamlit's script-execution thread, not the
-    process's main thread — COM auto-initializes the main thread for you
-    in a lot of contexts, but a worker thread gets no such favor, and
-    win32com fails with "CoInitialize has not been called" otherwise.
+    Calls pythoncom.CoInitialize()/CoUninitialize() around the COM
+    session. Required because this function runs on Streamlit's
+    script-execution thread, not the process's main thread; COM does not
+    auto-initialize a worker thread, and win32com raises "CoInitialize
+    has not been called" without this.
     """
     try:
         import pythoncom
